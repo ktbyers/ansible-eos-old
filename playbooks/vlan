@@ -1,0 +1,11 @@
+---
+- hosts: veos
+  tasks:
+  - name: create vlan 999
+    action: arista_vlan vlan_id=999 logging=true
+
+  - name: edit vlan 999
+    action: arista_vlan vlan_id=999 name=test logging=true
+
+  - name: delete vlan 999
+    action: arista_vlan vlan_id=999 state=absent logging=true

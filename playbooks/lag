@@ -1,0 +1,14 @@
+---
+- hosts: veos
+  tasks:
+  - name: create lag interface
+    action: arista_lag interface_id=Port-Channel1 links=Ethernet1,Ethernet2 logging=true
+
+  - name: add member links
+    action: arista_lag interface_id=Port-Channel1 links=Ethernet1,Ethernet2,Ethernet3 logging=true
+
+  - name: remove member links
+    action: arista_lag interface_id=Port-Channel1 links=Ethernet2,Ethernet3 logging=true
+
+  - name: remove lag interface
+    action: arista_lag interface_id=Port-Channel1 state=absent logging=true

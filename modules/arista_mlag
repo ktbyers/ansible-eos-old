@@ -1,0 +1,277 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+#
+# Copyright (C) 2013, Arista Networks <netdevops@aristanetworks.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+DOCUMENTATION = '''
+---
+module: arista_mlag
+author: Peter Sprygada
+short_description: Manage MLAG configuration
+requirements:
+    - Arista EOS 4.12
+    - Devops Extension for EOS
+description:
+    - Manage MLAG configuration resources on Arista EOS network devices
+options:
+    domain_id:
+        description:
+            - Unique identifier for the MLAG domain
+        required: false
+    logging:
+        description:
+            - enables or disables the syslog facility for this module
+        required: false
+        default: false
+        choices: [ 'true', 'false', 'yes', 'no' ]
+    local_interface:
+        description:
+            - Vlan interface for accepting connections from MLAG peer
+        required: false
+    peer_address:
+        description:
+            - IP address of MLAG peer
+        required: false
+    peer_link:
+        description:
+            - Interface connecting to MLAG peer
+        required: false
+    admin:
+        description:
+            - Control the administrative state of the MLAG configuration
+        required: false
+        default: 'up',
+        choices: [ 'up', 'down' ]
+    state:
+        description:
+            - Describe the desired state of the MLAG resource
+        required: false
+        default: 'present',
+        choices: [ 'present', 'absent' ]
+notes:
+    - Requires EOS 4.12 or later
+    - The Devops Extension for EOS must be installed and active in the
+      available extensions (show extensions from the EOS CLI)
+    - See http://eos.aristanetworks.com for details
+'''
+EXAMPLES = '''
+Example play
+Example playbook entries using the arista_mlag module to manage resource
+state.  Note that interface names must be the full interface name not shortcut
+names (ie Ethernet, not Et1)
+
+Example playbook entries using the arista_mlag module to manage mlag resource
+state.
+    tasks:
+    - name: enable mlag configuration
+      action: arista_mlag admin=up domain_id=mlag1 local_interface=Vlan4094
+
+    - name: disable mlag configuration with logging enabled
+      action: arista_mlag admin=down logging=true
+'''
+import syslog
+import json
+
+class AristaMlag(object):
+    """ This is the base class for managing the MLAG configuration in EOS. This
+    class provides a wrapper around the Devops Extenions for EOS.  You must
+    have the Devops Extension installed in order for this module to work
+    properly.
+
+        The following commands are implemented in this module:
+            * devops mlag show
+            * devops mlag edit
+            * devops mlag delete
+    """
+    attributes = ['domain_id', 'peer_link', 'peer_address', 'local_interface', \
+                  'admin']
+
+    def __init__(self, module):
+        self.module = module
+        self.domain_id = module.params['domain_id']
+        self.peer_link = module.params['peer_link']
+        self.peer_address = module.params['peer_address']
+        self.local_interface = module.params['local_interface']
+        self.logging = module.params['logging']
+        self.admin = module.params['admin']
+        self.state = module.params['state']
+
+    @property
+    def changed(self):
+        """ The changed property provides a boolean response if the currently
+            loaded resouces has changed from the resource running in EOS.
+
+            Returns True if the object is not in sync
+            Returns False if the object is in sync.
+        """
+        return len(self.updates()) > 0
+
+    def log(self, entry):
+        """ This method is responsible for sending log messages to the local
+            syslog.
+        """
+        if self.logging:
+            syslog.openlog('ansible-%s' % os.path.basename(__file__))
+            syslog.syslog(syslog.LOG_NOTICE, entry)
+
+    def run_command(self, cmd):
+        """ Calls the Ansible module run_command method. This method will
+            directly return the results of the run_command method
+        """
+        self.log(cmd)
+        return self.module.run_command(cmd.split())
+
+    def get(self):
+        """ This method will return a dictionary object containing the
+        attributes representing the current MLAG resource configuration.  The
+        MLAG resource has the following attributes:
+
+              {
+                "domain_id": <domain_id>,
+                "peer_address": <peer_address>,
+                "peer_link": <peer_link>,
+                "local_interface": <local_interface>,
+                "admin": [up, down],
+                "state": [present, absent]
+              }
+        """
+        cmd = 'devops mlag show'
+        (rc, out, err) = self.run_command(cmd)
+        obj = json.loads(out)
+        if obj.get('status') != 200:
+            return None
+        return obj['result']
+
+    def update(self):
+        """ Updates the existing MLAG resource in the current running
+        configuration.  Returns the updated MLAG resource if the update command
+        was successful otherwise returns None.
+
+        This method implements the following commands:
+            * devops mlag edit [attributes]
+        """
+        attribs = list()
+        for attrib in self.updates():
+            attribs.append("--%s" % attrib)
+            attribs.append(str(getattr(self, attrib)))
+
+        if attribs:
+            cmd = "devops mlag edit"
+            cmd += " ".join(attribs)
+
+            (rc, out, err) = self.run_command(cmd)
+            resp = json.loads(out)
+            if resp.get('status') != 200:
+                rc = int(resp['status'])
+                err = resp['message']
+                out = None
+            else:
+                out = resp['result']
+            return (rc, out, err)
+
+        return (0, None, "No attributes have been modified")
+
+    def updates(self):
+        """ This method checks the current resource attributes in the running
+        configuration and returns a list of attributes that are not in sync.
+        """
+        obj = self.get()
+        update = lambda a, z: a != z
+
+        updates = list()
+        for attrib in self.attributes:
+            value = getattr(self, attrib)
+            if update(obj[attrib], value) and value is not None:
+                updates.append(attrib)
+
+        self.log("updates: %s" % updates)
+        return updates
+
+    def delete(self):
+        """ Deletes the MLAG reesource from the current configuration.
+
+        This method implements the following commands:
+            * devops mlag delete
+        """
+        cmd = 'devops mlag delete'
+        (rc, out, err) = self.run_command(cmd)
+        obj = json.loads(out)
+        if obj.get('status') != 200:
+            return None
+        return obj['result']
+
+    def exists(self):
+        """ Returns True if the MLAG resource is present in the current
+        configuration, otherwise it returns False.  This method only checks for
+        the existence of the MLAG resource configuration.
+        """
+        obj = self.get()
+        return obj['result']['status'] == 'present'
+
+def main():
+    module = AnsibleModule(
+        argument_spec = dict(
+            domain_id=dict(default=none, type='str'),
+            logging=dict(default=False, type='bool'),
+            local_interface=dict(default=None, type='str')
+            peer_address=dict(default=none, type='str')
+            peer_link=dict(default=None, type='str')
+            admin=dict(default='up', choices=['up', 'down'])
+            state=dict(default='present', choices['present', 'absent'])
+        ),
+        supports_check_mode = True
+    )
+
+    obj = AristaMlag(module)
+
+    rc = None
+    result = dict()
+
+    if obj.state == 'absent':
+        if obj.exists():
+            if module.check_mode:
+                module.exit_json(changed=True)
+            (rc, out, err) = obj.delete()
+            if rc !=0:
+                module.fail_json(msg=err, rc=rc)
+
+    elif obj.state == 'present':
+        if not obj.exists():
+            if module.check_mode:
+                module.exit_json(changed=True)
+            (rc, out, err) = obj.create()
+            result['results'] = out
+        else:
+            if obj.changed:
+                if module.check_mode:
+                    module.exit_json(changed=obj.changed)
+                (rc, out, err) = obj.update()
+                result['results'] = out
+
+        if rc is not None and rc != 0:
+            module.fail_json(msg=err, rc=rc)
+
+    if rc is None:
+        result['changed'] = False
+    else:
+        result['changed'] = True
+
+    module.exit_json(**result)
+
+
+# include magic from lib/ansible/module_common.py
+#<<INCLUDE_ANSIBLE_MODULE_COMMON>>
+main()
