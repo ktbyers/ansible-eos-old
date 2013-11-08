@@ -191,17 +191,18 @@ class AristaSwitchport(object):
                 attribs.append("--%s" % attrib)
                 attribs.append(getattr(self, attrib))
 
-            cmd = "devops switchport create %s " % self.interface_id
+        cmd = "devops switchport create %s " % self.interface_id
+        if attribs:
             cmd += " ".join(attribs)
 
-            (rc, out, err) = self.run_command(cmd)
-            resp = json.loads(out)
-            if resp.get('status') != 201:
-                rc = int(resp['status'])
-                err = resp['message']
-                out = None
-            else:
-                out = resp['result']
+        (rc, out, err) = self.run_command(cmd)
+        resp = json.loads(out)
+        if resp.get('status') != 201:
+            rc = int(resp['status'])
+            err = resp['message']
+            out = None
+        else:
+            out = resp['result']
         return (rc, out, err)
 
     def update(self):
