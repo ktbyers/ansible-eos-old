@@ -217,7 +217,7 @@ class AristaVlan(object):
         updates = list()
         for attrib in self.attributes:
             value = getattr(self, attrib)
-            if update(obj[attrib], update) and value is not None:
+            if update(obj[attrib], value) and value is not None:
                 updates.append(attrib)
         self.log("updates: %s" % updates)
         return updates
